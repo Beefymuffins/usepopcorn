@@ -1,5 +1,6 @@
 /* eslint-disable react/jsx-no-bind */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { tempMovieData, tempWatchedData } from './data';
 import NavBar, { Logo, NumResults, SearchBar } from './components/Navbar';
 import Main from './components/Main';
 import { MovieList } from './components/ListBox';
@@ -7,9 +8,6 @@ import { WatchedSummary } from './components/WatchedBox';
 import Box from './components/Box';
 import WatchedMovieList from './components/WatchedMovie';
 import { MovieDetails } from './components/MovieDetails';
-import { useMovies } from './customHooks/useMovies';
-import { useLocalStorageState } from './customHooks/useLocalStorageState';
-
 /**
  * COMPOSITION
  * Made the Box component reuseable.(No longer need these, save for example)
@@ -18,12 +16,14 @@ import { useLocalStorageState } from './customHooks/useLocalStorageState';
  */
 
 export default function App() {
+  const [movies, setMovies] = useState([]);
+  const [watched, setWatched] = useState([]);
   const [query, setQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
   const [selectedId, setSelectedId] = useState('');
-  // CUSTOM HOOKS
-  // Use custom hook to get the movie, destructor what you need from it (what is returned from the hook)
-  const { movies, isLoading, error } = useMovies(query);
-  const [watched, setWatched] = useLocalStorageState([], 'watched');
+
+  const apiKey = process.env.REACT_APP_API_KEY;
 
   // useEffect(() => {
   //   fetch(`http://www.omdbapi.com/?apikey=${API_KEY}&s=${movie}`)
@@ -35,8 +35,6 @@ export default function App() {
     // CLick to open movie, click again to close movie
     setSelectedId((selectedID) => (id === selectedID ? null : id));
   }
-
-  // Close the 'Movies you watched' box when searching for new movie
   function handleCloseMovie() {
     setSelectedId(null);
   }
@@ -46,10 +44,6 @@ export default function App() {
       ...currentWatchedMovieArray,
       movie,
     ]);
-
-    // Add the watched movies to local storage (persist data on refresh)
-    // Need to make the new array because the watched state has not been updated yet
-    // localStorage.setItem('watched', JSON.stringify([...watched, movie]));
   }
 
   // Delete the movie fro list
@@ -61,6 +55,66 @@ export default function App() {
       )
     );
   }
+
+  // Fetch Movies (ASYNC)
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchMovies = async () => {
+      try {
+        setIsLoading(true);
+        // Reset ERROR STATE before searching
+        setError('');
+
+        const res = await fetch(
+          `http://www.omdbapi.com/?apikey=${apiKey}&s=${query}`,
+          { signal: controller.signal }
+        );
+
+        if (!res.ok)
+          throw new Error('Something went wrong with fetching movies!');
+
+        const data = await res.json();
+
+        if (data.Response === 'False') throw new Error('Movie Not Found!');
+
+        setMovies(data.Search);
+        setError('');
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.error(error.message);
+          setError(error.message);
+        }
+      } finally {
+        // finally: Will ALWAYS be ran at the end
+        setIsLoading(false);
+      }
+    };
+
+    if (query.length < 3) {
+      setMovies([]);
+      setError('');
+      return;
+    }
+
+    // Close the 'Movies you watched' box when searching for new movie
+    handleCloseMovie();
+
+    fetchMovies();
+
+    /**
+     * Cleanup function
+     *
+     * On every keystroke the component will rerender, causing the cleanup function to run
+     * canceling the initial request and replacing it with the new one
+     *
+     * See example of this by:
+     * watching the network tab in chrome and typing a movie in the searchbar
+     */
+    return () => {
+      controller.abort();
+    };
+  }, [query]);
 
   return (
     <>
